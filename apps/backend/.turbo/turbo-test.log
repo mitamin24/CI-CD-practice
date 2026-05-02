@@ -1,0 +1,25 @@
+
+
+> backend@1.0.0 test /home/luffy/Desktop/Learning to code again/CI-CD/apps/backend
+> vitest run
+
+[?25l
+ RUN  v4.1.5 /home/luffy/Desktop/Learning to code again/CI-CD/apps/backend
+
+[?2026h
+ ❯ src/math.test.ts [queued]
+
+ Test Files 0 passed (1)
+      Tests 0 passed (0)
+   Start at 04:38:10
+   Duration 100ms
+[?2026l[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K ✓ src/math.test.ts (1 test) 2ms
+   ✓ add function (1)
+     ✓ should add two numbers correctly 1ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  04:38:10
+   Duration  158ms (transform 19ms, setup 0ms, import 31ms, tests 2ms, environment 0ms)
+
+[?25h
