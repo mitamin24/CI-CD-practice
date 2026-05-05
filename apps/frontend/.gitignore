@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+ci_yml_explanation.md
+cicd_complete_guide.md
