@@ -1,77 +1,119 @@
+###############################################################################
+# CI/CD WORKFLOW CONFIGURATION
+# ---------------------------------------------------------------------------
+# This file defines the automated pipeline for your project.
+# It runs tests, checks code quality, builds a Docker image, and verifies it.
+###############################################################################
+
 name: CI
 
+# 🚀 TRIGGER: When should this workflow run?
 on:
   push:
-    branches: [main]
+    branches: [main]       # Runs on every push to the 'main' branch
   pull_request:
-    branches: [main]
+    branches: [main]       # Runs on every Pull Request targeting 'main'
 
 jobs:
-  # Job 1: Quality (Lint and Typecheck)
+  # ---------------------------------------------------------------------------
+  # JOB 1: CODE QUALITY (Linting & Typechecking)
+  # Purpose: Ensure code follows style guides and has no TypeScript errors.
+  # ---------------------------------------------------------------------------
   quality:
+    name: "🛡️ Quality Check"
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: "📂 1. Checkout code"
         uses: actions/checkout@v4
 
-      - name: Install pnpm
+      - name: "📦 2. Install pnpm"
         uses: pnpm/action-setup@v4
 
-      - name: Setup Node
+      - name: "🟢 3. Setup Node.js"
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'pnpm'
+          cache: 'pnpm'    # Speed up builds by caching node_modules
 
-      - name: Install dependencies
+      - name: "🛠️ 4. Install dependencies"
         run: pnpm install --frozen-lockfile
 
-      - name: Lint
-        run: pnpm lint
+      - name: "🔍 5. Run Lint & Typecheck"
+        run: pnpm run lint && pnpm run typecheck
 
-      - name: Typecheck
-        run: pnpm typecheck
+      - name: "📊 6. Generate Summary"
+        if: always()       # Run this even if checks fail so we can see what failed
+        run: |
+          echo "### Quality Check Results 🛡️" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Linting | ${{ job.status == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Typecheck | ${{ job.status == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
 
-  # Job 2: Run tests
+  # ---------------------------------------------------------------------------
+  # JOB 2: AUTOMATED TESTS
+  # Purpose: Run the test suite and save reports for debugging.
+  # ---------------------------------------------------------------------------
   test:
+    name: "🧪 Run Tests"
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: "📂 1. Checkout code"
         uses: actions/checkout@v4
 
-      - name: Install pnpm
+      - name: "📦 2. Install pnpm"
         uses: pnpm/action-setup@v4
 
-      - name: Setup Node
+      - name: "🟢 3. Setup Node.js"
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: 'pnpm'
 
-      - name: Install dependencies
+      - name: "🛠️ 4. Install dependencies"
         run: pnpm install --frozen-lockfile
 
-      - name: Run Tests
-        run: pnpm test
+      - name: "🧪 5. Run Vitest"
+        # We output a 'junit' report file so we can inspect results later
+        run: pnpm test -- --reporter=default --reporter=junit --outputFile=test-results.xml
 
-  # Job 3: Build and Push Docker Image
+      - name: "📤 6. Upload Reports"
+        if: always()       # Save the reports even if the tests fail!
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: "**/test-results.xml"
+
+      - name: "📊 7. Generate Summary"
+        if: always()
+        run: |
+          echo "### Test Execution Results 🧪" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ${{ job.status == 'success' && '✅ All tests passed' || '❌ Some tests failed' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Reports**: You can download the 'test-results' artifact from this run." >> $GITHUB_STEP_SUMMARY
+
+  # ---------------------------------------------------------------------------
+  # JOB 3: BUILD & DOCKERIZE
+  # Purpose: Build the Docker image and push it to Docker Hub.
+  # Runs ONLY if Quality and Test jobs pass.
+  # ---------------------------------------------------------------------------
   build-and-push:
+    name: "🐳 Build & Push Docker"
     needs: [quality, test]
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: "📂 1. Checkout code"
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
+      - name: "🏗️ 2. Set up Docker Buildx"
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to Docker Hub
+      - name: "🔑 3. Login to Docker Hub"
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USER }}
           password: ${{ secrets.DOCKER_PASS }}
 
-      - name: Build and push Docker image
+      - name: "🚀 4. Build & Push Image"
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -79,36 +121,50 @@ jobs:
           tags: |
             ${{ secrets.DOCKER_USER }}/turbo-ci:latest
             ${{ secrets.DOCKER_USER }}/turbo-ci:${{ github.sha }}
-          cache-from: type=gha
+          cache-from: type=gha   # Use GitHub Actions cache to speed up Docker builds
           cache-to: type=gha,mode=max
 
-  # Job 4: Smoke Test / Staging (Simulated)
-  # NOTE: On GitHub-hosted runners, this container will be destroyed after the job finishes.
-  # This serves as a "Smoke Test" to ensure the image can start correctly.
+  # ---------------------------------------------------------------------------
+  # JOB 4: SMOKE TEST (Verification)
+  # Purpose: Ensure the built container can actually start and stay running.
+  # Runs only on the 'main' branch after a successful push.
+  # ---------------------------------------------------------------------------
   smoke-test:
+    name: "🔥 Smoke Test"
     needs: build-and-push
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     steps:
-      - name: Pull image
+      - name: "📥 1. Pull New Image"
         run: docker pull ${{ secrets.DOCKER_USER }}/turbo-ci:${{ github.sha }}
 
-      - name: Run container and check health
+      - name: "🏃 2. Start Container & Check Health"
+        id: run_container
         run: |
+          # Start the container in detached mode
           docker run -d \
             --name staging-app \
             -p 4000:3001 \
             -e PORT=3001 \
             ${{ secrets.DOCKER_USER }}/turbo-ci:${{ github.sha }}
           
-          echo "Waiting for container to start..."
-          sleep 5
+          echo "Waiting 10 seconds for initialization..."
+          sleep 10
           
+          # Check if the container is still running
           if docker ps | grep staging-app; then
-            echo "Success: Container is running!"
+            echo "container_status=healthy" >> $GITHUB_OUTPUT
             docker stop staging-app
           else
-            echo "Error: Container failed to start!"
+            echo "container_status=failed" >> $GITHUB_OUTPUT
             docker logs staging-app
             exit 1
           fi
+
+      - name: "📊 3. Generate Summary"
+        if: always()
+        run: |
+          echo "### Smoke Test / Deployment Verification 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image Tag**: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Container Health**: ${{ steps.run_container.outputs.container_status == 'healthy' && '✅ Healthy' || '❌ Failed' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Port Mapping**: Host:4000 -> Container:3001" >> $GITHUB_STEP_SUMMARY
