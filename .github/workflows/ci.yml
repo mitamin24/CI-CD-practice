@@ -1,58 +1,118 @@
 name: CI
 
-on: 
-    pull_request:
-    push:
-        branches: [main]
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
 
 jobs:
-    ci:
-        runs-on: ubuntu-latest
+  # Job 1: Quality (Lint and Typecheck)
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-        steps: 
-            - uses: actions/checkout@v4
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
 
-            - name: Enable pnpm
-              run: corepack enable
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
 
-            - name: Install deps
-              run: pnpm install --frozen-lockfile
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
-            - name: Typechaek
-              run: pnpm typecheck
+      - name: Lint
+        run: pnpm lint
 
-            - name: Lint
-              run: pnpm lint
+      - name: Typecheck
+        run: pnpm typecheck
 
-            - name: Test
-              run: pnpm test
+  # Job 2: Run tests
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-            - name: Build
-              run: pnpm build
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
 
-            - name: Log in to Docker Hub
-              uses: docker/login-action@v3
-              with:
-                  username: ${{ secrets.DOCKER_USER }}
-                  password: ${{ secrets.DOCKER_PASS }}
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
 
-            - name: Build and push Docker image
-              run: |
-                  docker build -t ${{ secrets.DOCKER_USER }}/turbo-ci:${{ github.sha }} .
-                  docker push ${{ secrets.DOCKER_USER }}/turbo-ci:${{ github.sha }}
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
-    deploy-staging:
-        runs-on: ubuntu-latest
-        needs: ci
-        if: github.ref == 'refs/heads/main' 
+      - name: Run Tests
+        run: pnpm test
 
-        steps: 
-            - name: Pull image
-              run: docker pull ${{secrets.DOCKER_USER}}/turbo-ci:${{github.sha}}
+  # Job 3: Build and Push Docker Image
+  build-and-push:
+    needs: [quality, test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-            - name: Run container
-              run: |
-                  docker run -d \
-                    -p 4000:3001 \
-                    -e PORT=3001 \
-                    ${{secrets.DOCKER_USER}}/turbo-ci:${{github.sha}}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USER }}
+          password: ${{ secrets.DOCKER_PASS }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USER }}/turbo-ci:latest
+            ${{ secrets.DOCKER_USER }}/turbo-ci:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Job 4: Smoke Test / Staging (Simulated)
+  # NOTE: On GitHub-hosted runners, this container will be destroyed after the job finishes.
+  # This serves as a "Smoke Test" to ensure the image can start correctly.
+  smoke-test:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Pull image
+        run: docker pull ${{ secrets.DOCKER_USER }}/turbo-ci:${{ github.sha }}
+
+      - name: Run container and check health
+        run: |
+          docker run -d \
+            --name staging-app \
+            -p 4000:3001 \
+            -e PORT=3001 \
+            ${{ secrets.DOCKER_USER }}/turbo-ci:${{ github.sha }}
+          
+          echo "Waiting for container to start..."
+          sleep 5
+          
+          if docker ps | grep staging-app; then
+            echo "Success: Container is running!"
+            docker stop staging-app
+          else
+            echo "Error: Container failed to start!"
+            docker logs staging-app
+            exit 1
+          fi
