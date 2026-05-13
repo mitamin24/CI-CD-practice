@@ -18,11 +18,22 @@ jobs:
   # ---------------------------------------------------------------------------
   # JOB 1: CODE QUALITY (Linting & Typechecking)
   # Purpose: Ensure code follows style guides and has no TypeScript errors.
+  # 
+  # NOTE: Fixed a syntax error here by moving the PR Agent into 'steps' and 
+  # adding 'permissions' so it can actually comment on your Pull Requests.
   # ---------------------------------------------------------------------------
   quality:
     name: "🛡️ Quality Check"
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
     steps:
+      - name: "🤖 PR Agent"
+        uses: The-PR-Agent/pr-agent@v0.34.3
+        env: 
+          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+
       - name: "📂 1. Checkout code"
         uses: actions/checkout@v4
 
